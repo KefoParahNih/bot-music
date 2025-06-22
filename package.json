@@ -1,0 +1,23 @@
+{
+  "name": "bot-3",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "deploy": "node deploy-commands.js",
+    "start": "node src/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@discordjs/voice": "^0.18.0",
+    "discord.js": "^14.20.0",
+    "dotenv": "^16.5.0",
+    "ffmpeg-static": "^5.2.0",
+    "genius-lyrics": "^4.4.7",
+    "libsodium-wrappers": "^0.7.15",
+    "soundcloud-downloader": "^1.0.0"
+  }
+}
