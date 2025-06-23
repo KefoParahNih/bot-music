@@ -30,13 +30,9 @@ for (const folder of commandFolders) {
   for (const file of commandFiles) {
     const filePath = path.join(commandsPath, file);
     const command = require(filePath);
-    // Set item baru di Collection dengan key sebagai nama command dan value sebagai module yang diexport
     if ("data" in command && "execute" in command) {
+      command.category = folder;
       client.commands.set(command.data.name, command);
-    } else {
-      console.log(
-        `[PERINGATAN] Command di ${filePath} tidak memiliki properti "data" atau "execute".`
-      );
     }
   }
 }
