@@ -87,14 +87,19 @@ const play = async (guild, song, client) => {
       await serverQueue.nowPlayingMessage.delete().catch(() => {});
     }
 
+    // --- PERUBAHAN DI SINI ---: Menambahkan metadata ke resource
     const resource = createAudioResource(song.stream_url, {
-      metadata: { title: song.title },
-      inputType: StreamType.Arbitrary, // Anda bisa bereksperimen dengan ini
+      metadata: {
+        title: song.title,
+      },
+      inputType: StreamType.Arbitrary,
     });
 
     serverQueue.player.play(resource);
     serverQueue.connection.subscribe(serverQueue.player);
 
+    // --- PERUBAHAN DI SINI ---: Menambahkan error handler pada AudioPlayer
+    // Hapus listener lama untuk mencegah tumpukan, lalu tambahkan yang baru
     serverQueue.player.removeAllListeners("error");
     serverQueue.player.on("error", (error) => {
       console.error(
@@ -103,6 +108,7 @@ const play = async (guild, song, client) => {
       serverQueue.textChannel.send(
         `❌ Terjadi error saat memutar lagu. Melewati...`
       );
+      // Event 'idle' akan otomatis terpicu setelah error, jadi tidak perlu .stop() manual
     });
 
     const embed = new EmbedBuilder()
@@ -128,33 +134,26 @@ const play = async (guild, song, client) => {
     serverQueue.nowPlayingMessage = nowPlayingMessage;
   } catch (error) {
     console.error("Error saat play:", error);
-    if (serverQueue.songs.length > 0) serverQueue.songs.shift();
+    serverQueue.textChannel.send("Terjadi error saat mencoba memainkan lagu.");
+    serverQueue.songs.shift();
     play(guild, serverQueue.songs[0], client);
   }
 
   serverQueue.player.removeAllListeners(AudioPlayerStatus.Idle);
   serverQueue.player.once(AudioPlayerStatus.Idle, () => {
     if (serverQueue.loopMode === 1) {
-      // Loop lagu
+      // Loop lagu: do nothing, just replay
     } else if (serverQueue.loopMode === 2) {
-      // Loop antrian
       serverQueue.songs.push(serverQueue.songs.shift());
     } else {
-      // Loop mati
       serverQueue.songs.shift();
     }
 
-    // --- PERBAIKAN UTAMA: MEMBERI JEDA UNTUK MENCEGAH RACE CONDITION ---
-    setTimeout(() => {
-      // Cek lagi apakah antrian masih ada, karena bisa saja user menekan tombol stop
-      // saat jeda singkat ini.
-      if (client.queues.has(guild.id)) {
-        play(guild, serverQueue.songs[0], client);
-      }
-    }, 1000); // Jeda 500 milidetik (0.5 detik) sebelum memutar lagu selanjutnya
+    play(guild, serverQueue.songs[0], client);
   });
 };
 
+// ... (Sisa kode dari file play.js tetap sama persis) ...
 module.exports = {
   createButtonRow,
   play,
@@ -251,13 +250,6 @@ module.exports = {
       });
     }
 
-    if (songs.length === 0) {
-      return interaction.followUp({
-        content:
-          "Tidak ada lagu yang valid yang bisa ditambahkan dari sumber tersebut.",
-      });
-    }
-
     serverQueue.songs.push(...songs);
     const isQueueEmpty = serverQueue.songs.length === songs.length;
 
@@ -269,10 +261,14 @@ module.exports = {
         replyMessage = `✅ Ditambahkan ke antrian: **${songs[0].title}**.`;
       }
 
+      // Hapus "Thinking..." dan ganti dengan pesan atau tidak sama sekali
       if (isQueueEmpty && !playlistTitle) {
         await interaction.deleteReply().catch(console.error);
       } else {
-        await interaction.followUp({ content: replyMessage, ephemeral: true });
+        await interaction.followUp({
+          content: replyMessage,
+          flags: [MessageFlags.Ephemeral],
+        });
       }
     }
 
