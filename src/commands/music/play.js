@@ -17,34 +17,22 @@ const scdl = require("soundcloud-downloader").default;
 
 const createButtonRow = (queue) => {
   const isPaused = queue.player.state.status === AudioPlayerStatus.Paused;
-  const loopMode = queue.loopMode;
 
   const pauseResumeButton = new ButtonBuilder()
     .setCustomId("music_pause_resume")
     .setLabel(isPaused ? "Lanjutkan" : "Jeda")
     .setStyle(isPaused ? ButtonStyle.Success : ButtonStyle.Secondary)
     .setEmoji(isPaused ? "▶️" : "⏸️");
-
   const skipButton = new ButtonBuilder()
     .setCustomId("music_skip")
     .setLabel("Lewati")
     .setStyle(ButtonStyle.Secondary)
     .setEmoji("⏭️");
-
   const stopButton = new ButtonBuilder()
     .setCustomId("music_stop")
     .setLabel("Hentikan")
     .setStyle(ButtonStyle.Danger)
     .setEmoji("⏹️");
-
-  const loopButton = new ButtonBuilder()
-    .setCustomId("music_loop")
-    .setLabel(
-      `Ulang: ${loopMode === 1 ? "Lagu" : loopMode === 2 ? "Antrian" : "Mati"}`
-    )
-    .setStyle(loopMode === 0 ? ButtonStyle.Secondary : ButtonStyle.Primary)
-    .setEmoji("🔁");
-
   const shuffleButton = new ButtonBuilder()
     .setCustomId("music_shuffle")
     .setLabel("Acak")
@@ -55,18 +43,15 @@ const createButtonRow = (queue) => {
     pauseResumeButton,
     skipButton,
     stopButton,
-    loopButton,
     shuffleButton
   );
 };
 
 const play = async (guild, song, client) => {
   const serverQueue = client.queues.get(guild.id);
-
   if (!song) {
-    if (serverQueue.nowPlayingMessage) {
+    if (serverQueue.nowPlayingMessage)
       await serverQueue.nowPlayingMessage.delete().catch(() => {});
-    }
     serverQueue.textChannel.send("🎶 Antrian telah selesai.");
     setTimeout(() => {
       const currentQueue = client.queues.get(guild.id);
@@ -83,23 +68,14 @@ const play = async (guild, song, client) => {
   }
 
   try {
-    if (serverQueue.nowPlayingMessage) {
+    if (serverQueue.nowPlayingMessage)
       await serverQueue.nowPlayingMessage.delete().catch(() => {});
-    }
-
-    // --- PERUBAHAN DI SINI ---: Menambahkan metadata ke resource
     const resource = createAudioResource(song.stream_url, {
-      metadata: {
-        title: song.title,
-      },
+      metadata: { title: song.title },
       inputType: StreamType.Arbitrary,
     });
-
     serverQueue.player.play(resource);
     serverQueue.connection.subscribe(serverQueue.player);
-
-    // --- PERUBAHAN DI SINI ---: Menambahkan error handler pada AudioPlayer
-    // Hapus listener lama untuk mencegah tumpukan, lalu tambahkan yang baru
     serverQueue.player.removeAllListeners("error");
     serverQueue.player.on("error", (error) => {
       console.error(
@@ -108,7 +84,6 @@ const play = async (guild, song, client) => {
       serverQueue.textChannel.send(
         `❌ Terjadi error saat memutar lagu. Melewati...`
       );
-      // Event 'idle' akan otomatis terpicu setelah error, jadi tidak perlu .stop() manual
     });
 
     const embed = new EmbedBuilder()
@@ -125,7 +100,6 @@ const play = async (guild, song, client) => {
           inline: true,
         }
       );
-
     const row = createButtonRow(serverQueue);
     const nowPlayingMessage = await serverQueue.textChannel.send({
       embeds: [embed],
@@ -134,97 +108,80 @@ const play = async (guild, song, client) => {
     serverQueue.nowPlayingMessage = nowPlayingMessage;
   } catch (error) {
     console.error("Error saat play:", error);
-    serverQueue.textChannel.send("Terjadi error saat mencoba memainkan lagu.");
-    serverQueue.songs.shift();
+    if (serverQueue.songs.length > 0) serverQueue.songs.shift();
     play(guild, serverQueue.songs[0], client);
   }
 
   serverQueue.player.removeAllListeners(AudioPlayerStatus.Idle);
   serverQueue.player.once(AudioPlayerStatus.Idle, () => {
-    if (serverQueue.loopMode === 1) {
-      // Loop lagu: do nothing, just replay
-    } else if (serverQueue.loopMode === 2) {
-      serverQueue.songs.push(serverQueue.songs.shift());
-    } else {
-      serverQueue.songs.shift();
-    }
-
-    play(guild, serverQueue.songs[0], client);
+    // Logika loop dihilangkan. Selalu hapus lagu yang sudah selesai.
+    serverQueue.songs.shift();
+    setTimeout(() => {
+      if (client.queues.has(guild.id)) {
+        play(guild, serverQueue.songs[0], client);
+      }
+    }, 500);
   });
 };
 
-// ... (Sisa kode dari file play.js tetap sama persis) ...
 module.exports = {
   createButtonRow,
-  play,
   data: new SlashCommandBuilder()
     .setName("play")
-    .setDescription("Memainkan lagu atau playlist dari SoundCloud.")
+    .setDescription("Memainkan lagu atau playlist SoundCloud.")
     .addStringOption((option) =>
       option
         .setName("query")
-        .setDescription("Link lagu/playlist SoundCloud atau judul lagu.")
+        .setDescription("Link atau judul lagu.")
         .setRequired(true)
     ),
   async execute(interaction, client) {
     const query = interaction.options.getString("query");
     const voiceChannel = interaction.member.voice.channel;
-
-    if (!voiceChannel) {
+    if (!voiceChannel)
       return interaction.reply({
-        content: "Kamu harus berada di voice channel untuk memainkan musik!",
+        content: "Kamu harus berada di voice channel!",
         flags: [MessageFlags.Ephemeral],
       });
-    }
-
     await interaction.deferReply();
-
     let serverQueue = client.queues.get(interaction.guild.id);
-
     if (!serverQueue) {
       const queueContruct = {
         textChannel: interaction.channel,
-        voiceChannel: voiceChannel,
+        voiceChannel,
         connection: null,
         songs: [],
         player: createAudioPlayer(),
-        playing: true,
         isShuffled: false,
-        loopMode: 0,
         nowPlayingMessage: null,
       };
       client.queues.set(interaction.guild.id, queueContruct);
       serverQueue = client.queues.get(interaction.guild.id);
     }
-
-    let songs = [];
-    let playlistTitle = "";
-
+    let songs = [],
+      playlistTitle = "";
     try {
       if (scdl.isValidUrl(query) && query.includes("/sets/")) {
         const playlistInfo = await scdl.getSetInfo(query);
         playlistTitle = playlistInfo.title;
-        const trackPromises = playlistInfo.tracks.map(async (track) => {
-          return {
-            title: track.title,
-            url: track.permalink_url,
-            thumbnail: track.artwork_url || "https://i.imgur.com/xK30X7V.png",
-            duration: track.duration / 1000,
-            author: track.user.username,
-            stream_url: await scdl
-              .download(track.permalink_url)
-              .catch(() => null),
-            requester: interaction.user,
-          };
-        });
+        const trackPromises = playlistInfo.tracks.map(async (track) => ({
+          title: track.title,
+          url: track.permalink_url,
+          thumbnail: track.artwork_url || "https://i.imgur.com/xK30X7V.png",
+          duration: track.duration / 1000,
+          author: track.user.username,
+          stream_url: await scdl
+            .download(track.permalink_url)
+            .catch(() => null),
+          requester: interaction.user,
+        }));
         songs = (await Promise.all(trackPromises)).filter((s) => s.stream_url);
       } else {
         let songInfo;
-        if (scdl.isValidUrl(query)) {
-          songInfo = await scdl.getInfo(query);
-        } else {
+        if (scdl.isValidUrl(query)) songInfo = await scdl.getInfo(query);
+        else {
           const searchResults = await scdl.search({
-            query: query,
+            query,
             resourceType: "tracks",
           });
           if (searchResults.collection.length === 0)
@@ -243,35 +200,30 @@ module.exports = {
         songs.push(song);
       }
     } catch (error) {
-      console.error(error);
       return interaction.followUp({
-        content:
-          "Gagal mendapatkan info dari SoundCloud. Link mungkin tidak valid, privat, atau lagu tidak dapat di-streaming.",
+        content: "Gagal mendapatkan info dari SoundCloud.",
       });
     }
-
+    if (songs.length === 0)
+      return interaction.followUp({
+        content: "Tidak ada lagu valid yang bisa ditambahkan.",
+      });
     serverQueue.songs.push(...songs);
     const isQueueEmpty = serverQueue.songs.length === songs.length;
-
     if (interaction.deferred) {
       let replyMessage = "";
-      if (playlistTitle) {
+      if (playlistTitle)
         replyMessage = `✅ Menambahkan **${songs.length} lagu** dari playlist **${playlistTitle}**.`;
-      } else if (!isQueueEmpty) {
+      else if (!isQueueEmpty)
         replyMessage = `✅ Ditambahkan ke antrian: **${songs[0].title}**.`;
-      }
-
-      // Hapus "Thinking..." dan ganti dengan pesan atau tidak sama sekali
-      if (isQueueEmpty && !playlistTitle) {
+      if (isQueueEmpty && !playlistTitle)
         await interaction.deleteReply().catch(console.error);
-      } else {
+      else
         await interaction.followUp({
           content: replyMessage,
           flags: [MessageFlags.Ephemeral],
         });
-      }
     }
-
     if (!serverQueue.connection) {
       try {
         serverQueue.connection = joinVoiceChannel({
@@ -282,13 +234,10 @@ module.exports = {
       } catch (err) {
         client.queues.delete(interaction.guild.id);
         return interaction.followUp({
-          content: `Gagal bergabung ke voice channel: ${err.message}`,
+          content: `Gagal bergabung: ${err.message}`,
         });
       }
     }
-
-    if (isQueueEmpty) {
-      play(interaction.guild, serverQueue.songs[0], client);
-    }
+    if (isQueueEmpty) play(interaction.guild, serverQueue.songs[0], client);
   },
 };
